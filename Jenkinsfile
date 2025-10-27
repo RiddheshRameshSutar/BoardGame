@@ -92,10 +92,12 @@ pipeline {
             steps {
                 echo "🐳 Building Docker image..."
                 script {
+		    dir('BoardGame') {
                     sh '''
                         docker build -t ${APP_NAME}:${BUILD_NUMBER} .
                         docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest
                     '''
+		    }
                 }
             }
         }
