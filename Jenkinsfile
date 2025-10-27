@@ -22,8 +22,7 @@ pipeline {
         stage('Git Checkout') {
             steps {
                 echo "Checking out code..."
-                git branch: 'main', 
-                    url: 'https://github.com/RiddheshRameshSutar/BoardGame.git'
+                git branch: 'main', url: 'https://github.com/RiddheshRameshSutar/BoardGame.git'
                 sh 'ls -la'
             }
         }
@@ -32,7 +31,7 @@ pipeline {
             steps {
                 echo "Compiling project..."
                 dir('BoardGame') {
-                   sh 'mvn clean compile'
+                    sh 'mvn clean compile'
                 }
             }
         }
@@ -41,7 +40,7 @@ pipeline {
             steps {
                 echo "Running unit tests..."
                 dir('BoardGame') {
-                sh 'mvn test'
+                    sh 'mvn test'
                 }
             }
             post {
@@ -56,12 +55,12 @@ pipeline {
                 echo "Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQube') {
                     dir('BoardGame') {
-                    sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=BoardGame \
-                        -Dsonar.projectKey=BoardGame \
-                        -Dsonar.java.binaries=target/classes
-                    '''
+                        sh '''
+                            $SCANNER_HOME/bin/sonar-scanner \
+                            -Dsonar.projectName=BoardGame \
+                            -Dsonar.projectKey=BoardGame \
+                            -Dsonar.java.binaries=target/classes
+                        '''
                     }
                 }
             }
@@ -70,7 +69,7 @@ pipeline {
         stage('Quality Gate') {
             steps {
                 echo "Checking quality gate..."
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: false
                 }
             }
@@ -81,7 +80,6 @@ pipeline {
                 echo "Running Trivy filesystem scan..."
                 sh '''
                     trivy fs --format table -o trivy-fs-report.html . || true
-                    cat trivy-fs-report.html
                 '''
             }
         }
@@ -89,19 +87,23 @@ pipeline {
         stage('Build Application') {
             steps {
                 echo "Building application..."
-                sh 'mvn clean package -DskipTests'
-                sh 'ls -la target/'
+                dir('BoardGame') {
+                    sh 'mvn clean package -DskipTests'
+                    sh 'ls -la target/'
+                }
             }
         }
         
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image..."
-                script {
-                    sh '''
-                        docker build -t ${APP_NAME}:${BUILD_NUMBER} . || echo "Docker build skipped"
-                        docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest || true
-                    '''
+                dir('BoardGame') {
+                    script {
+                        sh '''
+                            docker build -t ${APP_NAME}:${BUILD_NUMBER} .
+                            docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest
+                        '''
+                    }
                 }
             }
         }
@@ -127,7 +129,6 @@ pipeline {
         always {
             echo "Pipeline execution completed!"
             
-            // Publish Trivy reports
             publishHTML([
                 reportDir: '.',
                 reportFiles: 'trivy-fs-report.html',
