@@ -8,7 +8,7 @@ WORKDIR /app
 COPY target/*.jar app.jar
 
 # Expose application port
-EXPOSE 8080
+EXPOSE 2255
 
 # Set JVM options
 ENV JAVA_OPTS="-Xmx512m -Xms256m"
