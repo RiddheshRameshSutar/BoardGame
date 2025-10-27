@@ -166,7 +166,6 @@ pipeline {
         always {
             echo "🏁 Pipeline execution completed!"
 
-            // Publish Trivy reports
             publishHTML([
                 reportDir: '.',
                 reportFiles: 'trivy-fs-report.html',
