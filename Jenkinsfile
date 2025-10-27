@@ -9,6 +9,7 @@ pipeline {
     environment {
         APP_NAME = "boardgame-app"
         SCANNER_HOME = tool 'SonarQube-Scanner'
+        APP_SERVER_IP = credentials('app-server-ip')
     }
     
     stages {
@@ -21,28 +22,28 @@ pipeline {
         
         stage('Git Checkout') {
             steps {
-                echo "📦 Checking out code..."
+                echo "📥 Checking out code..."
                 git branch: 'main', 
-                    url: 'https://github.com/RiddheshRameshSutar/BoardGame.git'
+                    url: 'https://github.com/RiddheshRameshSutar/BoardGame/'
                 sh 'ls -la'
             }
         }
         
         stage('Compile') {
             steps {
-                echo "⚙️ Compiling project..."
-                dir('BoardGame') {
-                    sh 'mvn clean compile'
-                }
+                echo "🔨 Compiling project..."
+		dir('BoardGame') {
+                sh 'mvn clean compile'
+		}
             }
         }
         
         stage('Unit Tests') {
             steps {
                 echo "🧪 Running unit tests..."
-                dir('BoardGame') {
-                    sh 'mvn test'
-                }
+		dir('BoardGame') {
+                sh 'mvn test'
+		}
             }
             post {
                 always {
@@ -53,37 +54,37 @@ pipeline {
         
         stage('SonarQube Analysis') {
             steps {
-                echo "🔍 Running SonarQube analysis..."
+                echo "📊 Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQube') {
-                    dir('BoardGame') {
-                        sh '''
-                            $SCANNER_HOME/bin/sonar-scanner \
-                            -Dsonar.projectName=BoardGame \
-                            -Dsonar.projectKey=BoardGame \
-                            -Dsonar.java.binaries=target/classes
-                        '''
-                    }
+		    dir('BoardGame') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=BoardGame \
+                        -Dsonar.projectKey=BoardGame \
+                        -Dsonar.java.binaries=target/classes
+                    '''
+		    }
                 }
             }
         }
-
+        
+            
         stage('Trivy FS Scan') {
             steps {
-                echo "🧰 Running Trivy filesystem scan..."
+                echo "🔍 Running Trivy filesystem scan..."
                 sh '''
                     trivy fs --format table -o trivy-fs-report.html . || true
-                    cat trivy-fs-report.html
                 '''
             }
         }
         
         stage('Build Application') {
             steps {
-                echo "🏗️ Building application..."
-                dir('BoardGame') {
-                    sh 'mvn clean package -DskipTests'
-                    sh 'ls -la target/'
-                }
+                echo "📦 Building application..."
+		dir('BoardGame') {
+                sh 'mvn clean package -DskipTests'
+                sh 'ls -la target/'
+		}
             }
         }
         
@@ -92,8 +93,8 @@ pipeline {
                 echo "🐳 Building Docker image..."
                 script {
                     sh '''
-                        docker build -t ${APP_NAME}:${BUILD_NUMBER} . || echo "Docker build skipped"
-                        docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest || true
+                        docker build -t ${APP_NAME}:${BUILD_NUMBER} .
+                        docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest
                     '''
                 }
             }
@@ -103,14 +104,68 @@ pipeline {
             steps {
                 echo "🔒 Scanning Docker image..."
                 sh '''
-                    trivy image --format table -o trivy-image-report.html ${APP_NAME}:latest || true
+                    trivy image --format table -o trivy-image-report.html ${APP_NAME}:latest
                 '''
+            }
+        }
+        
+        stage('Deploy to Application Server') {
+            steps {
+                echo "🚀 Deploying to application server..."
+                script {
+                    sshagent(['app-server-ssh']) {
+                        sh '''
+                            echo "Copying JAR file to app server..."
+                            scp -o StrictHostKeyChecking=no \
+                                target/*.jar \
+                                ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
+                            
+                            echo "Deploying application..."
+                            ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << 'ENDSSH'
+                                # Stop existing application
+                                sudo systemctl stop boardgame || true
+                                
+                                # Start application with systemd
+                                sudo systemctl start boardgame
+                                
+                                # Wait for application to start
+                                echo "Waiting for application to start..."
+                                sleep 15
+                                
+                                # Check status
+                                sudo systemctl status boardgame --no-pager
+ENDSSH
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                echo "💚 Performing health check..."
+                script {
+                    sh '''
+                        echo "Checking application health..."
+                        sleep 5
+                        
+                        # Try to access the application
+                        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_SERVER_IP}:2255/ || echo "000")
+                        
+                        if [ "$RESPONSE" = "200" ] || [ "$RESPONSE" = "302" ]; then
+                            echo "✓ Application is healthy! HTTP Status: $RESPONSE"
+                        else
+                            echo "⚠ Warning: Received HTTP Status: $RESPONSE"
+                            echo "Application might still be starting..."
+                        fi
+                    '''
+                }
             }
         }
         
         stage('Archive Artifacts') {
             steps {
-                echo "📦 Archiving build artifacts..."
+                echo "📁 Archiving artifacts..."
                 archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
             }
         }
@@ -142,6 +197,7 @@ pipeline {
         
         success {
             echo '✅ Pipeline completed successfully!'
+            echo "Application URL: http://${APP_SERVER_IP}:2255"
         }
         
         failure {
