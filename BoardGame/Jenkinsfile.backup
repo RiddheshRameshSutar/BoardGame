@@ -8,48 +8,44 @@ pipeline {
     
     environment {
         APP_NAME = "boardgame-app"
+        APP_VERSION = "${BUILD_NUMBER}"
         SCANNER_HOME = tool 'SonarQube-Scanner'
+        APP_SERVER_IP = credentials('app-server-ip')
     }
     
     stages {
         stage('Clean Workspace') {
             steps {
-                echo "Cleaning workspace..."
                 cleanWs()
             }
         }
         
         stage('Git Checkout') {
             steps {
-                echo "Checking out code..."
                 git branch: 'main', 
                     url: 'https://github.com/RiddheshRameshSutar/BoardGame.git'
-                sh 'ls -la'
             }
         }
         
         stage('Compile') {
             steps {
-                echo "Compiling project..."
                 sh 'mvn clean compile'
             }
         }
         
         stage('Unit Tests') {
             steps {
-                echo "Running unit tests..."
                 sh 'mvn test'
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+                    junit '**/target/surefire-reports/*.xml'
                 }
             }
         }
         
         stage('SonarQube Analysis') {
             steps {
-                echo "Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQube') {
                     sh '''
                         $SCANNER_HOME/bin/sonar-scanner \
@@ -63,38 +59,45 @@ pipeline {
         
         stage('Quality Gate') {
             steps {
-                echo "Checking quality gate..."
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: false
                 }
             }
         }
         
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '''
+                    --scan ./
+                    --format HTML
+                    --format XML
+                    --nvdApiKey YOUR_NVD_API_KEY
+                ''', odcInstallation: 'DP-Check'
+                
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
         stage('Trivy FS Scan') {
             steps {
-                echo "Running Trivy filesystem scan..."
                 sh '''
-                    trivy fs --format table -o trivy-fs-report.html . || true
-                    cat trivy-fs-report.html
+                    trivy fs --format table -o trivy-fs-report.html .
                 '''
             }
         }
         
         stage('Build Application') {
             steps {
-                echo "Building application..."
                 sh 'mvn clean package -DskipTests'
-                sh 'ls -la target/'
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image..."
                 script {
                     sh '''
-                        docker build -t ${APP_NAME}:${BUILD_NUMBER} . || echo "Docker build skipped"
-                        docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest || true
+                        docker build -t ${APP_NAME}:${APP_VERSION} .
+                        docker tag ${APP_NAME}:${APP_VERSION} ${APP_NAME}:latest
                     '''
                 }
             }
@@ -102,33 +105,59 @@ pipeline {
         
         stage('Trivy Image Scan') {
             steps {
-                echo "Scanning Docker image..."
                 sh '''
-                    trivy image --format table -o trivy-image-report.html ${APP_NAME}:latest || true
+                    trivy image --format table -o trivy-image-report.html ${APP_NAME}:latest
                 '''
             }
         }
         
-        stage('Archive Artifacts') {
+        stage('Deploy to Application Server') {
             steps {
-                echo "Archiving artifacts..."
-                archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
+                script {
+                    sshagent(['app-server-ssh']) {
+                        sh '''
+                            # Copy JAR to app server
+                            scp -o StrictHostKeyChecking=no \
+                                target/*.jar \
+                                ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
+                            
+                            # Restart application using systemd
+                            ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << 'ENDSSH'
+                                sudo systemctl restart boardgame
+                                sleep 10
+                                sudo systemctl status boardgame
+ENDSSH
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    sh '''
+                        # Health check
+                        curl -f http://${APP_SERVER_IP}:2255 || exit 1
+                        echo "Application deployed successfully!"
+                    '''
+                }
             }
         }
     }
     
     post {
         always {
-            echo "Pipeline execution completed!"
+            // Archive artifacts
+            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
             
-            // Publish Trivy reports
+            // Publish reports
             publishHTML([
                 reportDir: '.',
                 reportFiles: 'trivy-fs-report.html',
                 reportName: 'Trivy FS Scan Report',
                 keepAll: true,
-                alwaysLinkToLastBuild: true,
-                allowMissing: true
+                alwaysLinkToLastBuild: true
             ])
             
             publishHTML([
@@ -136,17 +165,19 @@ pipeline {
                 reportFiles: 'trivy-image-report.html',
                 reportName: 'Trivy Image Scan Report',
                 keepAll: true,
-                alwaysLinkToLastBuild: true,
-                allowMissing: true
+                alwaysLinkToLastBuild: true
             ])
+            
+            // Clean workspace
+            cleanWs()
         }
         
         success {
-            echo '✓ Pipeline completed successfully!'
+            echo 'Pipeline completed successfully!'
         }
         
         failure {
-            echo '✗ Pipeline failed!'
+            echo 'Pipeline failed!'
         }
     }
 }
