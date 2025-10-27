@@ -1,0 +1,40 @@
+====================================================
+BOARD GAME WEBAPP - DEPLOYMENT DETAILS
+====================================================
+Deployment Date: $(date)
+
+JENKINS SERVER
+--------------
+URL: $(cd terraform && terraform output -raw jenkins_url)
+IP: $(cd terraform && terraform output -raw jenkins_public_ip)
+SSH: ssh -i rrskey.pub ubuntu@$(cd terraform && terraform output -raw jenkins_public_ip)
+Admin User: admin
+Admin Password: [Your password]
+
+APPLICATION SERVER
+------------------
+URL: $(cd terraform && terraform output -raw application_url)
+IP: $(cd terraform && terraform output -raw app_server_public_ip)
+SSH: ssh -i rrskey.pub ubuntu@$(cd terraform && terraform output -raw app_server_public_ip)
+App Directory: /opt/boardgame-app
+
+MONITORING SERVER
+-----------------
+Prometheus: $(cd terraform && terraform output -raw prometheus_url)
+Grafana: $(cd terraform && terraform output -raw grafana_url)
+IP: $(cd terraform && terraform output -raw monitoring_public_ip)
+SSH: ssh -i rrskey.pub ubuntu@$(cd terraform && terraform output -raw monitoring_public_ip)
+
+Grafana Login:
+  Username: admin
+  Password: admin123
+
+NEXT STEPS
+----------
+1. ✅ Jenkins is configured
+2. ⏳ Configure SonarQube
+3. ⏳ Create Jenkins Pipeline
+4. ⏳ Deploy Application
+5. ⏳ Setup Monitoring Dashboards
+
+====================================================

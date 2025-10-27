@@ -1,0 +1,192 @@
+pipeline {
+    agent any
+    
+    tools {
+        maven 'Maven-3'
+        jdk 'JDK-17'
+    }
+    
+    environment {
+        APP_NAME = "boardgame-app"
+        APP_VERSION = "${BUILD_NUMBER}"
+        SCANNER_HOME = tool 'SonarQube-Scanner'
+        APP_SERVER_IP = credentials('app-server-ip')
+    }
+    
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', 
+                    url: 'https://github.com/DevOpsInstituteMumbai-wq/Automating-Secure-Deployment-of-Board-game-Listing-WebApp-on-AWS.git'
+            }
+        }
+        
+        stage('Compile') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+        
+        stage('Unit Tests') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=BoardGame \
+                        -Dsonar.projectKey=BoardGame \
+                        -Dsonar.java.binaries=target/classes
+                    '''
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
+                }
+            }
+        }
+        
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '''
+                    --scan ./
+                    --format HTML
+                    --format XML
+                    --nvdApiKey YOUR_NVD_API_KEY
+                ''', odcInstallation: 'DP-Check'
+                
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        stage('Trivy FS Scan') {
+            steps {
+                sh '''
+                    trivy fs --format table -o trivy-fs-report.html .
+                '''
+            }
+        }
+        
+        stage('Build Application') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh '''
+                        docker build -t ${APP_NAME}:${APP_VERSION} .
+                        docker tag ${APP_NAME}:${APP_VERSION} ${APP_NAME}:latest
+                    '''
+                }
+            }
+        }
+        
+        stage('Trivy Image Scan') {
+            steps {
+                sh '''
+                    trivy image --format table -o trivy-image-report.html ${APP_NAME}:latest
+                '''
+            }
+        }
+        
+        stage('Deploy to Application Server') {
+            steps {
+                script {
+                    sshagent(['app-server-ssh']) {
+                        sh '''
+                            # Copy JAR to app server
+                            scp -o StrictHostKeyChecking=no \
+                                target/*.jar \
+                                ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
+                            
+                            # Restart application
+                            ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << 'ENDSSH'
+                                # Stop existing application
+                                sudo systemctl stop boardgame || true
+                                
+                                # Start application
+                                cd /opt/boardgame-app
+                                nohup java -jar boardgame.jar > app.log 2>&1 &
+                                
+                                # Wait for application to start
+                                sleep 10
+                                
+                                # Check if application is running
+                                curl -f http://localhost:8080 || exit 1
+ENDSSH
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    sh '''
+                        # Health check
+                        curl -f http://${APP_SERVER_IP}:8080 || exit 1
+                        echo "Application deployed successfully!"
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Archive artifacts
+            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
+            
+            // Publish reports
+            publishHTML([
+                reportDir: '.',
+                reportFiles: 'trivy-fs-report.html',
+                reportName: 'Trivy FS Scan Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true
+            ])
+            
+            publishHTML([
+                reportDir: '.',
+                reportFiles: 'trivy-image-report.html',
+                reportName: 'Trivy Image Scan Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true
+            ])
+            
+            // Clean workspace
+            cleanWs()
+        }
+        
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
