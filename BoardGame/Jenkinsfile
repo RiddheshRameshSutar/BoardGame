@@ -121,20 +121,11 @@ pipeline {
                                 target/*.jar \
                                 ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
                             
-                            # Restart application
+                            # Restart application using systemd
                             ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << 'ENDSSH'
-                                # Stop existing application
-                                sudo systemctl stop boardgame || true
-                                
-                                # Start application
-                                cd /opt/boardgame-app
-                                nohup java -jar boardgame.jar > app.log 2>&1 &
-                                
-                                # Wait for application to start
+                                sudo systemctl restart boardgame
                                 sleep 10
-                                
-                                # Check if application is running
-                                curl -f http://localhost:2255 || exit 1
+                                sudo systemctl status boardgame
 ENDSSH
                         '''
                     }
