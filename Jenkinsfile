@@ -55,12 +55,14 @@ pipeline {
             steps {
                 echo "Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQube') {
+                    dir('BoardGame') {
                     sh '''
                         $SCANNER_HOME/bin/sonar-scanner \
                         -Dsonar.projectName=BoardGame \
                         -Dsonar.projectKey=BoardGame \
                         -Dsonar.java.binaries=target/classes
                     '''
+                    }
                 }
             }
         }
