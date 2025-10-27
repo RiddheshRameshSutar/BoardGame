@@ -23,7 +23,7 @@ pipeline {
         stage('Git Checkout') {
             steps {
                 git branch: 'main', 
-                    url: 'https://github.com/DevOpsInstituteMumbai-wq/Automating-Secure-Deployment-of-Board-game-Listing-WebApp-on-AWS.git'
+                    url: 'https://github.com/RiddheshRameshSutar/BoardGame.git'
             }
         }
         
@@ -134,7 +134,7 @@ pipeline {
                                 sleep 10
                                 
                                 # Check if application is running
-                                curl -f http://localhost:8080 || exit 1
+                                curl -f http://localhost:2255 || exit 1
 ENDSSH
                         '''
                     }
