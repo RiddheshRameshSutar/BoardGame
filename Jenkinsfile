@@ -31,14 +31,18 @@ pipeline {
         stage('Compile') {
             steps {
                 echo "Compiling project..."
-                sh 'mvn clean compile'
+                dir('BoardGame') {
+                   sh 'mvn clean compile'
+                }
             }
         }
         
         stage('Unit Tests') {
             steps {
                 echo "Running unit tests..."
+                dir('BoardGame') {
                 sh 'mvn test'
+                }
             }
             post {
                 always {
