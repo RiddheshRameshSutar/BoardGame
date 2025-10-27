@@ -145,43 +145,42 @@ pipeline {
         }
 
         stage('Health Check') {
-            steps {
-                echo "�� Performing health check..."
-                script {
-                    sshagent(['app-server-ssh']) {
-                        sh '''
-                            echo "Checking application health..."
-                            sleep 5
+    steps {
+        echo "💚 Performing health check..."
+        script {
+            sshagent(['app-server-ssh']) {
+                sh '''
+                    echo "Checking application health..."
+                    sleep 5
 
-                            # Check if port 2255 is open
-                            APP_PORT=$(ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} "sudo lsof -ti:2255 || echo 0")
+                    # Check if port 2255 is open
+                    APP_PORT=$(ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} "sudo lsof -ti:2255 || echo 0")
 
-                            if [ "$APP_PORT" != "0" ]; then
-                                RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_SERVER_IP}:2255/ || echo "000")
-                                echo "HTTP Response Code: $RESPONSE"
+                    if [ "$APP_PORT" != "0" ]; then
+                        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_SERVER_IP}:2255/ || echo "000")
+                        echo "HTTP Response Code: $RESPONSE"
 
-                                if [ "$RESPONSE" = "200" ]; then
-                                    echo "✅ Application is responding! Status: $RESPONSE"
-                                else
-                                    echo "⚠️  Application might still be starting. Status: $RESPONSE"
-                                fi
-                            else
-                                echo "❌ Application port is not active!"
-                            fi
+                        if [ "$RESPONSE" = "200" ]; then
+                            echo "✅ Application is responding! Status: $RESPONSE"
+                        else
+                            echo "⚠️  Application might still be starting. Status: $RESPONSE"
+                        fi
+                    else
+                        echo "❌ Application port is not active!"
+                    fi
 
-                            # Check service status
-                            ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << ENDSSH
-                                if sudo systemctl is-active --quiet boardgame; then
-                                    echo "✅ Service is active"
-                                else
-                                    echo "⚠️  Service status unclear"
-                                fi
-                            ENDSSH
-                        '''
-                    }
-                }
+                    # Check service status
+                    ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} "if sudo systemctl is-active --quiet boardgame; then
+                        echo '✅ Service is active'
+                    else
+                        echo '⚠️ Service status unclear'
+                    fi"
+                '''
             }
         }
+    }
+}
+
 
         stage('Archive Artifacts') {
             steps {
