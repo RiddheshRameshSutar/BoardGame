@@ -1,49 +1,50 @@
 pipeline {
     agent any
-    
+
     tools {
         maven 'Maven-3'
         jdk 'JDK-17'
     }
-    
+
     environment {
         APP_NAME = "boardgame-app"
         SCANNER_HOME = tool 'SonarQube-Scanner'
         APP_SERVER_IP = credentials('app-server-ip')
     }
-    
+
     stages {
+
         stage('Clean Workspace') {
             steps {
                 echo "🧹 Cleaning workspace..."
                 cleanWs()
             }
         }
-        
+
         stage('Git Checkout') {
             steps {
-                echo "📥 Checking out code..."
-                git branch: 'main', 
+                echo "�� Checking out code..."
+                git branch: 'main',
                     url: 'https://github.com/RiddheshRameshSutar/BoardGame/'
                 sh 'ls -la'
             }
         }
-        
+
         stage('Compile') {
             steps {
                 echo "🔨 Compiling project..."
-		dir('BoardGame') {
-                sh 'mvn clean compile'
-		}
+                dir('BoardGame') {
+                    sh 'mvn clean compile'
+                }
             }
         }
-        
+
         stage('Unit Tests') {
             steps {
                 echo "🧪 Running unit tests..."
-		dir('BoardGame') {
-                sh 'mvn test'
-		}
+                dir('BoardGame') {
+                    sh 'mvn test'
+                }
             }
             post {
                 always {
@@ -51,24 +52,23 @@ pipeline {
                 }
             }
         }
-        
+
         stage('SonarQube Analysis') {
             steps {
                 echo "📊 Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQube') {
-		    dir('BoardGame') {
-                    sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=BoardGame \
-                        -Dsonar.projectKey=BoardGame \
-                        -Dsonar.java.binaries=target/classes
-                    '''
-		    }
+                    dir('BoardGame') {
+                        sh '''
+                            $SCANNER_HOME/bin/sonar-scanner \
+                            -Dsonar.projectName=BoardGame \
+                            -Dsonar.projectKey=BoardGame \
+                            -Dsonar.java.binaries=target/classes
+                        '''
+                    }
                 }
             }
         }
-        
-            
+
         stage('Trivy FS Scan') {
             steps {
                 echo "🔍 Running Trivy filesystem scan..."
@@ -77,31 +77,31 @@ pipeline {
                 '''
             }
         }
-        
+
         stage('Build Application') {
             steps {
                 echo "📦 Building application..."
-		dir('BoardGame') {
-                sh 'mvn clean package -DskipTests'
-                sh 'ls -la target/'
-		}
+                dir('BoardGame') {
+                    sh 'mvn clean package -DskipTests'
+                    sh 'ls -la target/'
+                }
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
                 echo "🐳 Building Docker image..."
                 script {
-		    dir('BoardGame') {
-                    sh '''
-                        docker build -t ${APP_NAME}:${BUILD_NUMBER} .
-                        docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest
-                    '''
-		    }
+                    dir('BoardGame') {
+                        sh '''
+                            docker build -t ${APP_NAME}:${BUILD_NUMBER} .
+                            docker tag ${APP_NAME}:${BUILD_NUMBER} ${APP_NAME}:latest
+                        '''
+                    }
                 }
             }
         }
-        
+
         stage('Trivy Image Scan') {
             steps {
                 echo "🔒 Scanning Docker image..."
@@ -110,7 +110,7 @@ pipeline {
                 '''
             }
         }
-        
+
         stage('Deploy to Application Server') {
             steps {
                 echo "🚀 Deploying to application server..."
@@ -118,31 +118,22 @@ pipeline {
                     sshagent(['app-server-ssh']) {
                         sh '''
                             echo "Copying JAR file to app server..."
-                            scp -o StrictHostKeyChecking=no \
-                                target/*.jar \
-                                ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
+                            scp -o StrictHostKeyChecking=no BoardGame/target/*.jar ubuntu@${APP_SERVER_IP}:/opt/boardgame-app/boardgame.jar
                             
-                            echo "Deploying application..."
+                            echo "Deploying application on remote server..."
                             ssh -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} << 'ENDSSH'
-                                # Stop existing application
+                                echo "🔧 Restarting boardgame service..."
                                 sudo systemctl stop boardgame || true
-                                
-                                # Start application with systemd
                                 sudo systemctl start boardgame
-                                
-                                # Wait for application to start
-                                echo "Waiting for application to start..."
-                                sleep 15
-                                
-                                # Check status
+                                sleep 10
                                 sudo systemctl status boardgame --no-pager
-ENDSSH
+                            ENDSSH
                         '''
                     }
                 }
             }
         }
-        
+
         stage('Health Check') {
             steps {
                 echo "💚 Performing health check..."
@@ -151,20 +142,18 @@ ENDSSH
                         echo "Checking application health..."
                         sleep 5
                         
-                        # Try to access the application
                         RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_SERVER_IP}:2255/ || echo "000")
                         
                         if [ "$RESPONSE" = "200" ] || [ "$RESPONSE" = "302" ]; then
-                            echo "✓ Application is healthy! HTTP Status: $RESPONSE"
+                            echo "✅ Application is healthy! HTTP Status: $RESPONSE"
                         else
-                            echo "⚠ Warning: Received HTTP Status: $RESPONSE"
-                            echo "Application might still be starting..."
+                            echo "⚠ Warning: Application may still be starting (HTTP $RESPONSE)"
                         fi
                     '''
                 }
             }
         }
-        
+
         stage('Archive Artifacts') {
             steps {
                 echo "📁 Archiving artifacts..."
@@ -172,11 +161,11 @@ ENDSSH
             }
         }
     }
-    
+
     post {
         always {
             echo "🏁 Pipeline execution completed!"
-            
+
             // Publish Trivy reports
             publishHTML([
                 reportDir: '.',
@@ -186,7 +175,7 @@ ENDSSH
                 alwaysLinkToLastBuild: true,
                 allowMissing: true
             ])
-            
+
             publishHTML([
                 reportDir: '.',
                 reportFiles: 'trivy-image-report.html',
@@ -196,12 +185,12 @@ ENDSSH
                 allowMissing: true
             ])
         }
-        
+
         success {
             echo '✅ Pipeline completed successfully!'
             echo "Application URL: http://${APP_SERVER_IP}:2255"
         }
-        
+
         failure {
             echo '❌ Pipeline failed!'
         }
